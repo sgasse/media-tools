@@ -7,8 +7,8 @@ edition = "2021"
 anyhow = "1.0.95"
 chrono = "0.4.39"
 env_logger = "0.11.6"
+figment = { version = "0.10.19", features = ["yaml"] }
 log = "0.4.22"
 nom-exif = "2.2.1"
-serde = "1.0.217"
-toml = "0.8.19"
+serde = { version = "1.0.217", features = ["derive"] }
 walkdir = "2.5.0"
