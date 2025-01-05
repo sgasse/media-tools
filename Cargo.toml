@@ -1,0 +1,14 @@
+[package]
+name = "foto-sync"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+chrono = "0.4.39"
+env_logger = "0.11.6"
+log = "0.4.22"
+nom-exif = "2.2.1"
+serde = "1.0.217"
+toml = "0.8.19"
+walkdir = "2.5.0"
