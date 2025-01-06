@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    ffi::{OsStr, OsString},
+    ffi::OsString,
     fs,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
@@ -61,41 +61,61 @@ pub fn sync_files_to_location(
     for file in media_files {
         debug!("Found file {}", file.display());
         stats.found += 1;
-        let created = get_exif_date(&file).unwrap_or_default();
-        let key = hashed(file.file_name(), &created);
+        let key = hashed(file.file_name());
 
-        if let Some(existing) = existing_files.get(&key) {
-            // We assume pictures with the same name **and** the same creation date
-            // are either duplicates or different-quality versions of the same image.
-            // Duplicates are absolutely common when syncing from the same source again.
-            // Two versions of the same picture with different quality
-            // occurs when one version is the lower-quality copy from Google Photos
-            // and the other version is the original.
-            stats.existing += 1;
+        let created = if let Some(existing) = existing_files.get(&key) {
+            // We have at least one file with the same filename.
+            // In the majority of cases, this is the exact same file.
+            // Reading the file size is cheap,
+            // reading the exif create date is more expensive via the slow connection.
+
+            // We check first if there is an exact size match and skip the duplicate in this case.
+            stats.name_existing += 1;
             let file_size = get_file_size(&file)?;
-            debug!(
-                "File {} ({} bytes) is already found at {} ({} bytes)",
-                file.display(),
-                file_size,
-                existing.path.display(),
-                existing.size,
-            );
 
-            if file_size <= existing.size {
-                // The new version is of lower or equal quality.
+            if existing.iter().any(|e| e.size == file_size) {
                 debug!(
-                    "Skipping duplicate / lower-quality version of {}",
-                    file.display()
+                    "Identified {} as duplicate of an existing file (same name, both {} bytes)",
+                    file.display(),
+                    file_size
                 );
                 stats.skipped += 1;
                 continue;
             }
 
-            stats.copied_hq += 1;
+            // There is no size match, we have to check the exif date
+            // to identify if this is the same media file with differing quality.
+            let created = get_exif_date(&file).unwrap_or_default();
+            if let Some(existing) = existing.iter().find(|e| e.created == created) {
+                debug!(
+                    "File {} ({} bytes) is already found at {} ({} bytes)",
+                    file.display(),
+                    file_size,
+                    existing.path.display(),
+                    existing.size,
+                );
 
-            // We assume the current file is higher-quality version of the same image.
+                if file_size <= existing.size {
+                    // The new version is of lower or equal quality.
+                    debug!(
+                        "Skipping duplicate / lower-quality version of {}",
+                        file.display()
+                    );
+                    stats.skipped += 1;
+                    continue;
+                }
+            }
+
+            // The new file matches by exif date and has a larger file size (assumed to be better quality).
+            // Copy new file.
+            stats.copied_hq += 1;
+            created
+
             // TODO: Move to a subdirectory that makes replacing the lower-quality version easier.
-        }
+            // TODO: Same day, same name, different exif date?
+        } else {
+            get_exif_date(&file).unwrap_or_default()
+        };
 
         let date_dir = target_dir.join(format!(
             "{:04}_{:02}_{:02}",
@@ -114,7 +134,6 @@ pub fn sync_files_to_location(
         stats.copied += 1;
     }
 
-    // TODO: No newlines in log
     info!("{:#?}", stats);
 
     Ok(())
@@ -136,25 +155,31 @@ fn build_extension_set(extensions: &[String]) -> Result<HashSet<OsString>> {
 fn build_existing_files_set(
     existing_paths: &[String],
     extensions: &HashSet<OsString>,
-) -> HashMap<u64, ExistingFile> {
-    existing_paths
-        .iter()
-        .flat_map(|p| {
-            WalkDir::new(p)
-                .into_iter()
-                .filter_map(|x| x.ok())
-                .filter(|e| !e.file_type().is_dir())
-                .filter_map(|e| match e.path().extension() {
-                    Some(ext) if extensions.contains(ext) => Some(e.path().to_owned()),
-                    _ => None,
-                })
-                .filter_map(|e| ExistingFile::create_from_path(&e).ok())
-                .map(|e| (hashed(e.path.file_name(), &e.created), e))
-        })
-        .collect()
+) -> HashMap<u64, Vec<ExistingFile>> {
+    let mut existing_files = HashMap::new();
+
+    for existing in existing_paths.iter().flat_map(|p| {
+        WalkDir::new(p)
+            .into_iter()
+            .filter_map(|x| x.ok())
+            .filter(|e| !e.file_type().is_dir())
+            .filter_map(|e| match e.path().extension() {
+                Some(ext) if extensions.contains(ext) => Some(e.path().to_owned()),
+                _ => None,
+            })
+            .filter_map(|e| ExistingFile::create_from_path(&e).ok())
+    }) {
+        let key = hashed(existing.path.file_name());
+        existing_files
+            .entry(key)
+            .and_modify(|v: &mut Vec<ExistingFile>| v.push(existing.clone()))
+            .or_insert_with(|| vec![existing]);
+    }
+
+    existing_files
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ExistingFile {
     created: DateTime<FixedOffset>,
     size: u64,
@@ -191,12 +216,9 @@ fn get_file_size(path: &Path) -> Result<u64> {
     }
 }
 
-fn hashed(filename: Option<&OsStr>, created: &DateTime<FixedOffset>) -> u64 {
+fn hashed<T: Hash>(data: T) -> u64 {
     let mut hasher = DefaultHasher::new();
-    if let Some(filename) = filename {
-        filename.hash(&mut hasher);
-    }
-    created.hash(&mut hasher);
+    data.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -244,37 +266,9 @@ fn get_exif_date(path: &Path) -> Option<DateTime<FixedOffset>> {
 
 #[derive(Debug, Default)]
 struct Statistics {
-    existing: usize,
+    name_existing: usize,
     found: usize,
     skipped: usize,
     copied_hq: usize,
     copied: usize,
-}
-
-#[allow(dead_code)]
-fn dump_exif_info(path: &Path) {
-    let mut parser = MediaParser::new();
-    let Ok(src) = MediaSource::file_path(path) else {
-        return;
-    };
-
-    if src.has_exif() {
-        println!("Exif info of foto {}", path.display());
-
-        let Ok(iter) = parser.parse::<_, _, ExifIter>(src) else {
-            return;
-        };
-        for info in iter {
-            println!("{info:?}")
-        }
-    } else if src.has_track() {
-        println!("Exif info of video {}", path.display());
-
-        let Ok(track_info) = parser.parse::<_, _, TrackInfo>(src) else {
-            return;
-        };
-        for info in track_info {
-            println!("{info:?}")
-        }
-    }
 }
