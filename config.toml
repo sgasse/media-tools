@@ -1,0 +1,9 @@
+extensions = ["jpg", "mp4"]
+existing_paths = [
+  "/home/guest/Pictures/Archive",
+  "/home/guest/Pictures/ByYears",
+]
+search_paths = [
+  "/run/user/1000/gvfs/mtp:host=SAMSUNG_SAMSUNG_Android_ABCDEFGHIJK/Interner Speicher/DCIM/Camera",
+]
+output_path = "/home/guest/Pictures/ByYears"

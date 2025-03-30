@@ -1,14 +1,15 @@
 [package]
-name = "foto-sync"
+name = "media-tools"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 anyhow = "1.0.95"
 chrono = "0.4.39"
 env_logger = "0.11.6"
-figment = { version = "0.10.19", features = ["yaml"] }
+figment = { version = "0.10.19", features = ["toml"] }
 log = "0.4.22"
+log4rs = "1.3.0"
 nom-exif = "2.2.1"
 serde = { version = "1.0.217", features = ["derive"] }
 walkdir = "2.5.0"
