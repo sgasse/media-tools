@@ -1,4 +1,5 @@
 existing_paths: 
+  - "/home/guest/Pictures/ByYears"
   - "/home/guest/TMP_SORTED_PICS"
 search_paths:
   - "/run/user/1000/gvfs/mtp:host=SAMSUNG_SAMSUNG_Android_ABCDEFGHIJK/Interner Speicher/DCIM/Camera"
